@@ -9,7 +9,7 @@ Questo progetto realizza un ponte di comunicazione contactless ad alta stabilit�
 ## 🚀 Caratteristiche Principali
 
 ### 📡 Firmware & Hardware (ESP32-C3)
-* **True Hardware SAK Extraction:** Accesso diretto tramite *Pointer Casting* alla RAM del chip PN532 (`pn532_packetbuffer[11]`) per catturare il vero byte SAK (SEL_RES) emesso dal silicio del tag, eliminando approssimazioni software.
+* **True Hardware SAK Extraction:** Accesso diretto tramite *Pointer Casting* alla RAM del chip PN532 (`pn532_packetbuffer[11]`) per catturare il vero byte SAK (SEL_RES).
 * **1-Second Heartbeat Polling:** Gestione della rimozione ad intervallo temporizzato (1000ms) combinato al monitoraggio del pin IRQ. Mantiene la portante RF stabile senza asfissiare il bus I2C, garantendo l'alimentazione costante delle smartcard complesse a Layer 4 (CIE).
 * **Feedback Acustici Dedicati:** Modulo PWM (`ledc`) integrato per generare notifiche sonore istantanee e differenziate all'inserimento, distacco o errore hardware.
 * **Pure Pass-Through:** Il firmware non interpreta i comandi; inoltra in modo trasparente i blocchi APDU (`Update Binary`, `Read Binary`, `Get Data`) scambiati con l'host.
