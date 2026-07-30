@@ -86,7 +86,7 @@ Il chip PN532 è interfacciato sul bus I2C dell'ESP32-C3 SuperMini. Il monitorag
 
 Questo progetto è rilasciato sotto la licenza **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International** (CC BY-NC-SA 4.0).
 
-[![Licenza CC BY-NC-SA 4.0](https://shields.io)](https://creativecommons.org)
+![License](https://img.shields.io/badge/License-Creative%20Commons-green?style=flat)
 
 *   **Libero utilizzo privato, didattico e di studio.**
 *   **Vietata qualsiasi forma di commercializzazione** (vendita dell'hardware, dell'applicazione, o di derivati) senza l'esplicito consenso scritto dell'autore originale.
