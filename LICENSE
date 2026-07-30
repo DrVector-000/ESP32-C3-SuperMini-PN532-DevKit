@@ -1,0 +1,31 @@
+Licenza Creative Commons Attribuzione - Non commerciale - Condividi allo stesso modo 4.0 Internazionale
+
+Il presente progetto "ESP32-C3-SuperMini-PN532-DevKit" (comprensivo di codice firmware, 
+software applicativo macOS e documentazione) è protetto dal diritto d'autore ed è 
+rilasciato sotto i termini della licenza Creative Commons Attribuzione - Non commerciale - 
+Condividi allo stesso modo 4.0 Internazionale (CC BY-NC-SA 4.0).
+
+Tu sei libero di:
+- Condividere: riprodurre, distribuire, comunicare al pubblico, esporre in pubblico, 
+  rappresentare, eseguire e recitare questo materiale con qualsiasi mezzo e formato.
+- Modificare: rimescolare, trasformare il materiale e basarti su di esso per le tue opere.
+
+Alle seguenti condizioni:
+1. Attribuzione (BY) — Devi riconoscere una menzione di paternità adeguata, fornire un 
+   link alla licenza e indicare se sono state effettuate delle modifiche.
+2. Non Commerciale (NC) — Non puoi utilizzare il materiale per scopi commerciali. 
+   La vendita dell'hardware assemblato, del firmware pre-compilato, dell'applicazione 
+   macOS, o l'integrazione di questi elementi in prodotti o servizi commerciali 
+   è tassativamente vietata senza il preventivo consenso scritto dell'autore originale.
+3. Condividi allo stesso modo (SA) — Se rimisceli, trasformi il materiale o ti basi su 
+   di esso, devi distribuire le tue contribuzioni con la stessa licenza del materiale 
+   originale.
+
+Il testo completo della licenza legale è consultabile all'indirizzo:
+https://creativecommons.org
+
+IL MATERIALE VIENE FORNITO "COSÌ COM'È", SENZA GARANZIE DI ALCUN TIPO, ESPRESSE O 
+IMPLICITE, INCLUSE, A TITOLO ESEMPLIFICATIVO, GARANZIE DI COMMERCIABILITÀ, IDONEITÀ 
+PER UN FINE PARTICOLARE E NON VIOLAZIONE DEI DIRITTI DI TERZI. IN NESSUN CASO GLI 
+AUTORI O I TITOLARI DEL DIRITTO D'AUTORE SARANNO RESPONSABILI PER QUALSIASI RECLAMO, 
+DANNO O ALTRA RESPONSABILITÀ.
