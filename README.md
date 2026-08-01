@@ -1,12 +1,12 @@
 # ESP32-C3-SuperMini-PN532-DevKit
 
 ![Platform](https://img.shields.io/badge/Platform-ESP32%20C3%20SuperMini-red?style=flat)
-![CI Module](https://img.shields.io/badge/CI%20Module-PN532-brightgreen?style=flat)
+![IC Module](https://img.shields.io/badge/CI%20Module-PN532-brightgreen?style=flat)
 
 
 Kit di Sviluppo per Lettore/Scrittore di SmartCard PC/SC con ESP32-C3 SuperMini e PN532.
 
-Questo progetto realizza un ponte di comunicazione contactless ad alta stabilità basato sulle specifiche industriali **PC/SC Part 3** e sullo standard **CCID**. Il sistema è composto da un firmware ottimizzato per il microcontrollore RISC-V **ESP32-C3** (che funge da passamano trasparente a Layer 3) e da un'applicazione nativa per **macOS** sviluppata in Swift/SwiftUI che centralizza l'intelligenza di analisi, la decodifica multi-record NDEF e il tracciamento diagnostico.
+Questo progetto realizza un ponte di comunicazione contactless ad alta stabilità basato sulle specifiche industriali **PC/SC Part 3** e sullo standard **CCID**. Il sistema è composto da un firmware ottimizzato per il microcontrollore RISC-V **ESP32-C3** e da un'applicazione nativa per **macOS** sviluppata in Swift/SwiftUI che centralizza l'intelligenza di analisi, la decodifica multi-record NDEF e il tracciamento diagnostico.
 
 ---
 
