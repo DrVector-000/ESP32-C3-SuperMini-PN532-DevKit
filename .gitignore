@@ -1,3 +1,5 @@
 # MacOS hidden files
 ._*
 
+# Python files
+__pycache__/
