@@ -8,6 +8,7 @@ import time
 from tkinter import filedialog
 import CcidParser
 import NdefParser
+import NdefEncoder
 
 class TkWindowMain:
 
@@ -39,6 +40,10 @@ class TkWindowMain:
         self.__ndef_max_page = 39       # Limite standard per NTAG213 (pagine 4-39 utente)
         self.__ndef_raw_buffer = []      # Buffer lineare in cui accumulare i byte estratti
 
+        # Variabili di stato per la catena di scrittura NDEF asincrona
+        self.__ndef_writing_active = False
+        self.__ndef_write_current_page = 0
+        self.__ndef_write_buffer = [] # Conterrà l'array finale formattato da flashare
 
     # Metodi (accesso privato)
     def __SetControlsState(self, connect):
@@ -55,6 +60,7 @@ class TkWindowMain:
             self.btn_read_page['state'] = 'disabled'
             self.status_label['text'] = "Seriale Disconnessa"
             self.btn_read_ndef['state'] = 'disabled'
+            self.btn_flash_ndef['state'] = 'disabled'
             
     def __Log(self, message):
         """Aggiunge una riga di testo alla console log con il timestamp esatto."""
@@ -102,6 +108,8 @@ class TkWindowMain:
                             self.card_atr_val.config(text="-")
                             self.raw_data_output.config(text="-")
                             self.btn_read_ndef['state'] = 'disabled'
+                            self.btn_flash_ndef['state'] = 'disabled'
+                            self.__ndef_writing_active = False # Ferma l'operazione in corso se la carta si allontana
 
                             # --- CANCELLAZIONE NODI DELLA TREEVIEW AL DISTACCO ---
                             for item in self.ndef_tree.get_children():
@@ -114,17 +122,30 @@ class TkWindowMain:
                         self.card_uid_val.config(text=result.hex_uid)
                         self.card_type_val.config(text=result.tag_family)
                         self.btn_read_ndef['state'] = 'normal'  # SBLOCCO: La carta è pronta per il dump NDEF
+                        self.btn_flash_ndef['state'] = 'normal'
                         self.__Log(result.log_message)
                         
                     elif result.event_type == "APDU":
                         self.__Log(result.log_message)
                         
                         # -------------------------------------------------------------
-                        # SCENARIO A: La lettura sequenziale NDEF è attiva
+                        # SCENARIO A.1: La scrittura sequenziale NDEF è attiva
                         # -------------------------------------------------------------
-                        if self.__ndef_reading_active:
-                            # Trasformiamo la stringa esadecimale dell'helper in byte numerici interi
-                            # (Escludendo gli ultimi 2 byte che rappresentano la Status Word 90 00)
+                        if self.__ndef_writing_active:
+                            # Se la carta risponde con successo (90 00), passiamo alla pagina successiva
+                            if "90 00" in result.hex_payload:
+                                self.__ndef_write_current_page += 1
+                                # Pianifica la scrittura del blocco successivo (30ms di attesa per l'I2C)
+                                self.root.after(30, self.__WriteNextNdefChunk)
+                            else:
+                                self.__ndef_writing_active = False
+                                self.btn_flash_ndef['state'] = 'normal'
+                                self.__Log("❌ ERRORE SCRITTURA: Il tag ha rifiutato l'operazione di flash.")
+                        
+                        # -------------------------------------------------------------
+                        # SCENARIO A.2: La lettura sequenziale NDEF è attiva
+                        # -------------------------------------------------------------
+                        elif self.__ndef_reading_active:
                             raw_hex_list = result.hex_payload.split()
                             if len(raw_hex_list) >= 2 and raw_hex_list[-2:] == ["90", "00"]:
                                 raw_hex_list = raw_hex_list[:-2]
@@ -132,37 +153,23 @@ class TkWindowMain:
                             page_bytes = [int(hx, 16) for hx in raw_hex_list]
                             self.__ndef_raw_buffer.extend(page_bytes)
                             
-                            # Avanza alla pagina successiva
                             self.__ndef_current_page += 1
-                            
                             if self.__ndef_current_page <= self.__ndef_max_page:
-                                # Pianifica la richiesta della pagina successiva con un micro-ritardo 
-                                # per lasciare respirare l'I2C e la seriale (30ms)
                                 self.root.after(30, self.__RequestNextNdefPage)
                             else:
-                                # FINE DELLA CATENA: La memoria utente è stata interamente estratta!
                                 self.__ndef_reading_active = False
-                                self.btn_read_ndef['state'] = 'normal' # Riabilita il bottone
+                                self.btn_read_ndef['state'] = 'normal'
                                 self.__Log("🏁 SCANSIONE COMPLETATA: Elaborazione record NDEF in corso...")
                                 
-                                # Invochiamo il nostro Helper NdefParser passando il buffer accumulato
                                 detected_records = NdefParser.NdefParser.parse_ndef_message(self.__ndef_raw_buffer)
-                                
                                 if not detected_records:
-                                    self.__Log("⚠️ ANALISI NDEF: Nessun record valido o formato TLV vuoto trovato.")
+                                    self.__Log("⚠️ ANALISI NDEF: Nessun record valido trovato.")
                                 else:
-                                    # Inseriamo i record estratti all'interno della Treeview grafica
                                     for rec in detected_records:
-                                        self.ndef_tree.insert('', END, values=(
-                                            rec.index,
-                                            rec.type_str,
-                                            rec.payload,
-                                            rec.summary
-                                        ))
-                                        self.__Log(f"📝 Record #{rec.index} aggiunto alla tabella: {rec.summary}")
+                                        self.ndef_tree.insert('', END, values=(rec.index, rec.type_str, rec.payload, rec.summary))
                         
                         # -------------------------------------------------------------
-                        # SCENARIO B: Lettura manuale singola dal tab Raw (Nessun dump attivo)
+                        # SCENARIO B: Lettura manuale singola dal tab Raw
                         # -------------------------------------------------------------
                         else:
                             formatted_output = f"{result.hex_payload}  ({result.ascii_payload})"
@@ -243,6 +250,77 @@ class TkWindowMain:
         full_packet = ccid_header + apdu_command
         
         # Invio sulla seriale
+        self.serialdevice.write_bytes(full_packet)
+
+    def __AddRecordToQueue(self):
+        """Prende i dati dal form di input e li inserisce nella Treeview di coda."""
+        t_sel = self.w_type_cb.get()
+        rec_type = "T" if "Testo" in t_sel else "U"
+        val = self.w_value_entry.get().strip()
+        
+        if not val:
+            return
+            
+        self.write_tree.insert('', END, values=(rec_type, val))
+        self.w_value_entry.delete(0, END) # Svuota il campo di testo
+
+    def __ClearWriteQueue(self):
+        """Svuota la tabella della coda record."""
+        for item in self.write_tree.get_children():
+            self.write_tree.delete(item)
+
+    def __FlashNdefSequence(self):
+        """Esegue il compile tramite l'Helper e innesca la sequenza asincrona di flash."""
+        records = []
+        for item in self.write_tree.get_children():
+            row = self.write_tree.item(item)['values']
+            records.append({'type': row[0], 'value': str(row[1])})
+            
+        if not records:
+            self.__Log("⚠️ FUNZIONE SCRITTURA: La coda dei record è vuota. Inserire almeno un campo.")
+            return
+
+        # Compilazione binaria tramite l'Helper NdefEncoder
+        self.__ndef_write_buffer = NdefEncoder.NdefEncoder.compile_records(records)
+        
+        self.__Log(f"💾 AVVIO SCRITTURA: Messaggio compilato con successo. Byte totali: {len(self.__ndef_write_buffer)}")
+        
+        # Avvio della macchina a stati sequenziale a blocchi
+        self.__ndef_write_current_page = 4 # La memoria utente riscrivibile inizia a pagina 4
+        self.__ndef_writing_active = True
+        self.btn_flash_ndef['state'] = 'disabled' # Protezione
+        
+        self.__WriteNextNdefChunk()
+
+    def __WriteNextNdefChunk(self):
+        """Invia l'APDU Update Binary per scrivere 4 byte nella pagina corrente."""
+        if not self.__ndef_writing_active:
+            return
+            
+        # Calcoliamo gli indici dell'array di byte corrispondenti alla pagina corrente
+        byte_index = (self.__ndef_write_current_page - 4) * 4
+        
+        if byte_index >= len(self.__ndef_write_buffer):
+            # LA SCRITTURA È TERMINATA CON SUCCESSO!
+            self.__ndef_writing_active = False
+            self.btn_flash_ndef['state'] = 'normal'
+            self.__Log("🏆 OPERAZIONE COMPLETATA: Il tag NFC è stato interamente programmato!")
+            return
+
+        # Estraiamo l'esatto chunk di 4 byte da inserire nella pagina
+        chunk = self.__ndef_write_buffer[byte_index : byte_index + 4]
+        
+        self.__message_sequence = (self.__message_sequence + 1) & 0xFF
+        
+        # Struttura APDU standard PC/SC Update Binary (7 byte totali):
+        # CLA=FF, INS=D6, P1=00, P2=Pagina, Le=04, [5-8] Payload dati da scrivere
+        apdu_command = [0xFF, 0xD6, 0x00, self.__ndef_write_current_page & 0xFF, 0x04] + chunk
+        
+        # Intestazione standard CCID XfrBlock (0x6F): Lunghezza payload = 9 byte (5 header APDU + 4 dati)
+        ccid_header = [0x6F, 0x09, 0x00, 0x00, 0x00, 0x00, self.__message_sequence, 0x00, 0x00, 0x00]
+        full_packet = ccid_header + apdu_command
+        
+        self.__Log(f"▶️ INVIO APDU UPDATE (Page {self.__ndef_write_current_page}): [" + " ".join(f"{b:02X}" for b in chunk) + "]")
         self.serialdevice.write_bytes(full_packet)
 
     # Metodi (accesso pubblico)
@@ -381,8 +459,47 @@ class TkWindowMain:
         tree_scroll.pack(side=RIGHT, fill=Y)
         self.ndef_tree.pack(side=LEFT, fill=BOTH, expand=True)
 
+        # =====================================================================
+        # --- Configurazione Grafica Tab Scrittura NDEF ---
+        # =====================================================================
+        write_input_frame = ttk.LabelFrame(tab_write, text=" Nuovo Record NDEF ")
+        write_input_frame.pack(fill=X, expand=False, padx=10, pady=5, anchor=NW)
 
-        ttk.Label(tab_write, text="Campi di compilazione per il flash dei blocchi.").pack(padx=10, pady=10)
+        ttk.Label(write_input_frame, text="Tipo:").grid(row=1, column=1, sticky=W, padx=10, pady=5)
+        self.w_type_cb = ttk.Combobox(write_input_frame, values=["Testo (T)", "Link/URL (U)"], width=12, state="readonly")
+        self.w_type_cb.current(1) # Imposta URL di default
+        self.w_type_cb.grid(row=1, column=2, sticky=W, padx=5, pady=5)
+
+        ttk.Label(write_input_frame, text="Contenuto:").grid(row=1, column=3, sticky=W, padx=15, pady=5)
+        self.w_value_entry = ttk.Entry(write_input_frame, width=45)
+        self.w_value_entry.grid(row=1, column=4, sticky=W, padx=5, pady=5)
+
+        btn_add_record = ttk.Button(write_input_frame, text="Aggiungi in Coda", command=self.__AddRecordToQueue)
+        btn_add_record.grid(row=1, column=5, sticky=W, padx=15, pady=5)
+
+        # Tabella riassuntiva dei record pronti per essere flashati
+        write_queue_frame = ttk.LabelFrame(tab_write, text=" Coda Record Pronti per il Flash ")
+        write_queue_frame.pack(fill=BOTH, expand=True, padx=10, pady=5, anchor=NW)
+
+        self.write_tree = ttk.Treeview(write_queue_frame, columns=('type', 'value'), show='headings', height=5, selectmode='browse')
+        self.write_tree.heading('type', text="Tipo")
+        self.write_tree.heading('value', text="Valore / Payload")
+        self.write_tree.column('type', width=120, anchor=CENTER)
+        self.write_tree.column('value', width=550, anchor=W)
+        self.write_tree.pack(side=LEFT, fill=BOTH, expand=True, padx=5, pady=5)
+
+        # Barra comandi inferiore del Tab Scrittura
+        write_actions_bar = ttk.Frame(tab_write)
+        write_actions_bar.pack(fill=X, expand=False, padx=10, pady=5)
+
+        self.btn_clear_w_tree = ttk.Button(write_actions_bar, text="Svuota Coda", command=self.__ClearWriteQueue)
+        self.btn_clear_w_tree.pack(side=LEFT, padx=5)
+
+        self.btn_flash_ndef = ttk.Button(write_actions_bar, text="Scrivi Messaggio Completo sul Tag", command=self.__FlashNdefSequence)
+        self.btn_flash_ndef.pack(side=RIGHT, padx=5)
+        self.btn_flash_ndef['state'] = 'disabled' # Disabilitato finché non c'è una carta pronta
+
+
         ttk.Label(tab_tools, text="Funzioni di Wipe memoria e formattazione TLV.").pack(padx=10, pady=10)
 
         # =====================================================================
