@@ -10,6 +10,12 @@ Questo progetto realizza un ponte di comunicazione contactless ad alta stabilit�
 
 ---
 
+### 🛠️ Hardware di Riferimento
+Il firmware e l'ingegnerizzazione di questo software sono stati scritti e collaudati espressamente per la scheda di sviluppo integrata disponibile su eBay:
+👉 **[Scheda di Sviluppo ESP32-C3 SuperMini + PN532 su eBay](https://www.ebay.it/itm/127865020402)**
+
+---
+
 ## 🚀 Caratteristiche Principali
 
 ### 📡 Firmware & Hardware (ESP32-C3)
