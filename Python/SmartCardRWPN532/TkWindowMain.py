@@ -45,6 +45,9 @@ class TkWindowMain:
         self.__ndef_write_current_page = 0
         self.__ndef_write_buffer = [] # Conterrà l'array finale formattato da flashare
 
+        # Variabile di stato per la catena di Wipe/Formattazione asincrona
+        self.__ndef_wipe_active = False
+
     # Metodi (accesso privato)
     def __SetControlsState(self, connect):
         if connect:
@@ -61,6 +64,8 @@ class TkWindowMain:
             self.status_label['text'] = "Seriale Disconnessa"
             self.btn_read_ndef['state'] = 'disabled'
             self.btn_flash_ndef['state'] = 'disabled'
+            self.btn_wipe_tag['state'] = 'disabled'
+            self.btn_dump_file['state'] = 'disabled'
             
     def __Log(self, message):
         """Aggiunge una riga di testo alla console log con il timestamp esatto."""
@@ -101,6 +106,7 @@ class TkWindowMain:
                             self.serialdevice.write_bytes(power_on_packet)
                             
                         elif result.slot_status == 0x02:
+                            self.__ndef_wipe_active = False # Ferma l'operazione se il tag viene sollevato
                             self.__ndef_reading_active = False # Forza lo stop se la carta viene tolta
                             self.card_status_val.config(text="Slot Vuoto", foreground="orange")
                             self.card_type_val.config(text="-")
@@ -110,6 +116,8 @@ class TkWindowMain:
                             self.btn_read_ndef['state'] = 'disabled'
                             self.btn_flash_ndef['state'] = 'disabled'
                             self.__ndef_writing_active = False # Ferma l'operazione in corso se la carta si allontana
+                            self.btn_wipe_tag['state'] = 'disabled'
+                            self.btn_dump_file['state'] = 'disabled'
 
                             # --- CANCELLAZIONE NODI DELLA TREEVIEW AL DISTACCO ---
                             for item in self.ndef_tree.get_children():
@@ -123,16 +131,30 @@ class TkWindowMain:
                         self.card_type_val.config(text=result.tag_family)
                         self.btn_read_ndef['state'] = 'normal'  # SBLOCCO: La carta è pronta per il dump NDEF
                         self.btn_flash_ndef['state'] = 'normal'
+                        self.btn_wipe_tag['state'] = 'normal'
+                        self.btn_dump_file['state'] = 'normal'
                         self.__Log(result.log_message)
                         
                     elif result.event_type == "APDU":
                         self.__Log(result.log_message)
                         
                         # -------------------------------------------------------------
-                        # SCENARIO A.1: La scrittura sequenziale NDEF è attiva
+                        # SCENARIO A.0: La formattazione/Wipe del tag è attiva
                         # -------------------------------------------------------------
-                        if self.__ndef_writing_active:
-                            # Se la carta risponde con successo (90 00), passiamo alla pagina successiva
+                        if self.__ndef_wipe_active:
+                            if "90 00" in result.hex_payload:
+                                self.__ndef_write_current_page += 1
+                                # Pianifica la cancellazione della pagina successiva dopo 30ms (Debounce bus I2C)
+                                self.root.after(30, self.__WriteNextWipeChunk)
+                            else:
+                                self.__ndef_wipe_active = False
+                                self.btn_wipe_tag['state'] = 'normal'
+                                self.__Log("❌ ERRORE UTILITY: Il tag ha rifiutato la formattazione dei blocchi.")
+                                
+                        # -------------------------------------------------------------
+                        # SCENARIO A.1: La scrittura sequenziale NDEF è attiva (Inalterata)
+                        # -------------------------------------------------------------
+                        elif self.__ndef_writing_active:
                             if "90 00" in result.hex_payload:
                                 self.__ndef_write_current_page += 1
                                 # Pianifica la scrittura del blocco successivo (30ms di attesa per l'I2C)
@@ -323,12 +345,62 @@ class TkWindowMain:
         self.__Log(f"▶️ INVIO APDU UPDATE (Page {self.__ndef_write_current_page}): [" + " ".join(f"{b:02X}" for b in chunk) + "]")
         self.serialdevice.write_bytes(full_packet)
 
+    def __WipeTagSequence(self):
+        """Innesca la sovrascrittura sequenziale di azzeramento delle pagine utente (4-39)."""
+        self.__Log("🧹 AVVIO UTILITY: Inizio formattazione di fabbrica (Factory Wipe)...")
+        
+        # Inizializziamo i parametri della macchina a stati per la formattazione
+        self.__ndef_write_current_page = 4
+        self.__ndef_wipe_active = True
+        
+        # Disabilita temporaneamente i pulsanti di controllo per evitare conflitti
+        self.btn_wipe_tag['state'] = 'disabled'
+        self.btn_flash_ndef['state'] = 'disabled'
+        
+        # Richiede la scrittura della prima pagina di azzeramento
+        self.__WriteNextWipeChunk()
+
+    def __WriteNextWipeChunk(self):
+        """Invia l'APDU Update Binary per scrivere 4 byte nulli (0x00) nella pagina corrente."""
+        if not self.__ndef_wipe_active:
+            return
+            
+        # NTAG213 ha le pagine utente da 4 a 39
+        if self.__ndef_write_current_page > 39:
+            # LA FORMATTAZIONE È TERMINATA CON SUCCESSO!
+            self.__ndef_wipe_active = False
+            self.btn_wipe_tag['state'] = 'normal'
+            self.btn_flash_ndef['state'] = 'normal'
+            self.__Log("🏆 UTILITY COMPLETATA: Il tag NFC è stato formattato e riportato allo stato di fabbrica!")
+            return
+
+        self.__message_sequence = (self.__message_sequence + 1) & 0xFF
+        
+        # Array di 4 byte a zero (Stato di fabbrica dell'NTAG)
+        wipe_chunk = [0x00, 0x00, 0x00, 0x00]
+        
+        # APDU standard PC/SC Update Binary (7 byte totali): CLA=FF, INS=D6, P1=00, P2=Pagina, Le=04 + 4 byte nulli
+        apdu_command = [0xFF, 0xD6, 0x00, self.__ndef_write_current_page & 0xFF, 0x04] + wipe_chunk
+        
+        # Intestazione standard CCID XfrBlock (0x6F)
+        ccid_header = [0x6F, 0x09, 0x00, 0x00, 0x00, 0x00, self.__message_sequence, 0x00, 0x00, 0x00]
+        full_packet = ccid_header + apdu_command
+        
+        self.__Log(f"▶️ FORMATTAZIONE (Page {self.__ndef_write_current_page}): [00 00 00 00]")
+        self.serialdevice.write_bytes(full_packet)
+
+    def __DumpToFileSequence(self):
+        """Avvia la scansione totale delle pagine e prepara il salvataggio su file .txt/.hex."""
+        self.__Log("📂 AVVIO UTILITY: Avvio estrazione speculare della memoria per esportazione...")
+        # Nota: Qui useremo la macchina a stati di lettura estesa a tutte le pagine (0-44).
+        # Al termine del dump, invocheremo filedialog.asksaveasfilename() per salvare i dati su PC.
+
     # Metodi (accesso pubblico)
     def Show(self):    
         # 1. CREAZIONE OBBLIGATORIA DELLA FINESTRA PRINCIPALE (Prima di ogni altra istanza Tk)
         self.root = Tk()
         self.root.title("SmartCard Read/Write PN532")
-        self.root.geometry("850x800")
+        self.root.geometry("1000x800")
         self.root.eval('tk::PlaceWindow . center')
 
         # 2. ALLOCAZIONE VARIABILE DI CONTROLLO (Ora lo scope della root è valido al 100%)
@@ -499,8 +571,25 @@ class TkWindowMain:
         self.btn_flash_ndef.pack(side=RIGHT, padx=5)
         self.btn_flash_ndef['state'] = 'disabled' # Disabilitato finché non c'è una carta pronta
 
+        # =====================================================================
+        # --- Configurazione Grafica Tab Utility & Tools ---
+        # =====================================================================
+        tools_container = ttk.LabelFrame(tab_tools, text=" Operazioni di Manutenzione Hardware ")
+        tools_container.pack(fill=BOTH, expand=True, padx=10, pady=10, anchor=NW)
 
-        ttk.Label(tab_tools, text="Funzioni di Wipe memoria e formattazione TLV.").pack(padx=10, pady=10)
+        # Riga 1: Ripristino e formattazione di fabbrica
+        ttk.Label(tools_container, text="Ripristino Memoria Utente:").grid(row=1, column=1, sticky=W, padx=15, pady=15)
+        
+        self.btn_wipe_tag = ttk.Button(tools_container, text="Formatta Tag (Factory Wipe)", command=self.__WipeTagSequence)
+        self.btn_wipe_tag.grid(row=1, column=2, sticky=W, padx=5, pady=15)
+        self.btn_wipe_tag['state'] = 'disabled'
+
+        # Riga 2: Backup speculare su file di testo del computer
+        ttk.Label(tools_container, text="Backup e Clona:").grid(row=2, column=1, sticky=W, padx=15, pady=15)
+        
+        self.btn_dump_file = ttk.Button(tools_container, text="Esporta Dump Completo in File", command=self.__DumpToFileSequence)
+        self.btn_dump_file.grid(row=2, column=2, sticky=W, padx=5, pady=15)
+        self.btn_dump_file['state'] = 'disabled'
 
         # =====================================================================
         # 4. AREA LOG
